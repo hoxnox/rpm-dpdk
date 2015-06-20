@@ -3,9 +3,16 @@
 # Add option to build as static libraries (--without shared)
 %bcond_without shared
 
+# Docs requirements are not satisfied across distros
+%if 0%{?fedora} > 20
+%bcond_with doc
+%else
+%bcond_without doc
+%endif
+
 Name: dpdk
 Version: 2.0.0 
-Release: 2%{?dist}
+Release: 3%{?dist}
 URL: http://dpdk.org
 Source: http://dpdk.org/browse/dpdk/snapshot/dpdk-%{version}.tar.gz
 
@@ -34,9 +41,12 @@ ExclusiveArch: x86_64
 %define target x86_64-%{machine}-linuxapp-gcc
 
 
+BuildRequires: gcc-c++ make
+BuildRequires: kernel-headers, libpcap-devel
 
-BuildRequires: kernel-headers, libpcap-devel, doxygen, texlive-dejavu
-BuildRequires: python-sphinx inkscape
+%if %{with docs}
+BuildRequires: doxygen, python-sphinx, texlive-dejavum inkscape
+%endif
 
 %description
 The Data Plane Development Kit is a set of libraries and drivers for
@@ -53,15 +63,19 @@ Provides: %{name}-static = %{version}-%{release}
 This package contains the headers and other files needed for developing
 applications with the Data Plane Development Kit.
 
+%if %{with docs}
 %package doc
 Summary: Data Plane Development Kit API documentation
 BuildArch: noarch
 
 %description doc
 API programming documentation for the Data Plane Development Kit.
+%endif
 
 %define sdkdir  %{_libdir}/%{name}-%{version}-sdk
+%if %{with docs}
 %define docdir  %{_docdir}/%{name}-%{version}
+%endif
 
 %prep
 %setup -q
@@ -85,7 +99,9 @@ export EXTRA_CFLAGS="%{optflags} -fPIC"
 
 make V=1 O=%{target} T=%{target} %{?_smp_mflags} config
 make V=1 O=%{target} %{?_smp_mflags}
+%if %{with docs}
 make V=1 O=%{target} %{?_smp_mflags} doc
+%endif
 
 %install
 
@@ -97,8 +113,10 @@ mkdir -p                     %{buildroot}%{_includedir}/%{name}-%{version}
 cp -Lr  %{target}/include/*   %{buildroot}%{_includedir}/%{name}-%{version}
 mkdir -p                     %{buildroot}%{_libdir}/%{name}-%{version}
 cp -a  %{target}/lib/*       %{buildroot}%{_libdir}/%{name}-%{version}
+%if %{with docs}
 mkdir -p                     %{buildroot}%{docdir}
 cp -a  %{target}/doc/*       %{buildroot}%{docdir}
+%endif
 
 # DPDK apps expect a particular (and somewhat peculiar) directory layout
 # for building, arrange for that
@@ -164,9 +182,11 @@ install -m 644 ${comblib} %{buildroot}/%{_libdir}/%{name}-%{version}/${comblib}
 %{_libdir}/%{name}-%{version}/*.so.*
 %endif
 
+%if %{with docs}
 %files doc
 #BSD
 %{docdir}
+%endif
 
 %files devel
 #BSD
@@ -180,6 +200,9 @@ install -m 644 ${comblib} %{buildroot}/%{_libdir}/%{name}-%{version}/${comblib}
 %endif
 
 %changelog
+* Sat Jun 20 2015 Arun Babu Neelicattu <arun.neelicattu@gmail.com> - 2.0.0-3
+- Add --without doc for non fedora builds
+
 * Wed Jun 17 2015 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 2.0.0-2
 - Rebuilt for https://fedoraproject.org/wiki/Fedora_23_Mass_Rebuild
 
