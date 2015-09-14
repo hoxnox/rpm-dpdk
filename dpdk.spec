@@ -12,7 +12,7 @@
 
 Name: dpdk
 Version: 2.0.0 
-Release: 3%{?dist}
+Release: 4%{?dist}
 URL: http://dpdk.org
 Source: http://dpdk.org/browse/dpdk/snapshot/dpdk-%{version}.tar.gz
 
@@ -63,6 +63,12 @@ Provides: %{name}-static = %{version}-%{release}
 This package contains the headers and other files needed for developing
 applications with the Data Plane Development Kit.
 
+%package examples
+Summary: Data Plane Development Kit development files
+
+%description examples
+This package contains the Data Plane Development Kit sample application source.
+
 %if %{with docs}
 %package doc
 Summary: Data Plane Development Kit API documentation
@@ -72,10 +78,9 @@ BuildArch: noarch
 API programming documentation for the Data Plane Development Kit.
 %endif
 
-%define sdkdir  %{_libdir}/%{name}-%{version}-sdk
-%if %{with docs}
-%define docdir  %{_docdir}/%{name}-%{version}
-%endif
+%define sdkdir      %{_libdir}/%{name}-%{version}-sdk
+%define docdir      %{_docdir}/%{name}-%{version}
+%define examplesdir %{_docdir}/%{name}-%{version}-examples
 
 %prep
 %setup -q
@@ -117,6 +122,10 @@ cp -a  %{target}/lib/*       %{buildroot}%{_libdir}/%{name}-%{version}
 mkdir -p                     %{buildroot}%{docdir}
 cp -a  %{target}/doc/*       %{buildroot}%{docdir}
 %endif
+
+# DPDK sample apps
+mkdir -p                     %{buildroot}%{examplesdir}
+cp -ra examples/*            %{buildroot}%{examplesdir}
 
 # DPDK apps expect a particular (and somewhat peculiar) directory layout
 # for building, arrange for that
@@ -199,7 +208,14 @@ install -m 644 ${comblib} %{buildroot}/%{_libdir}/%{name}-%{version}/${comblib}
 %{_libdir}/%{name}-%{version}/*.so
 %endif
 
+%files examples
+#BSD
+%{examplesdir}
+
 %changelog
+* Mon Sep 14 2015 Arun Babu Neelicattu <arun.neelicattu@gmail.com> - 2.0.0-4
+- Add dpdk-examples as a subpackage
+
 * Sat Jun 20 2015 Arun Babu Neelicattu <arun.neelicattu@gmail.com> - 2.0.0-3
 - Add --without doc for non fedora builds
 
