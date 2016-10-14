@@ -4,28 +4,14 @@
 %bcond_without examples
 # Add option to build without tools
 %bcond_without tools
-
-# Dont edit Version: and Release: directly, only these:
-%define ver 2.2.0
-%define rel 2
-# Define when building git snapshots
-#define snapver 3721.gita38e5ec1
-
-%define srcver %{ver}%{?snapver:-%{snapver}}
+# Add option to build the PDF documentation separately (--with pdfdoc)
+%bcond_with pdfdoc
 
 Name: dpdk
-Version: %{ver}
-Release: %{?snapver:0.%{snapver}.}%{rel}%{?dist}
+Version: 16.07
+Release: 1%{?dist}
 URL: http://dpdk.org
-Source: http://dpdk.org/browse/dpdk/snapshot/dpdk-%{srcver}.tar.gz
-
-# Only needed for creating snapshot tarballs, not used in build itself
-Source100: dpdk-snapshot.sh
-
-# Some tweaking and tuning needed due to Fedora %%optflags
-Patch2: dpdk-2.2-warningflags.patch
-Patch4: dpdk-2.2-dtneeded.patch
-Patch5: dpdk-2.1-buildopts.patch
+Source: http://dpdk.org/browse/dpdk/snapshot/dpdk-%{version}.tar.xz
 
 Summary: Set of libraries and drivers for fast packet processing
 
@@ -39,20 +25,61 @@ License: BSD and LGPLv2 and GPLv2
 #
 # The DPDK is designed to optimize througput of network traffic using, among
 # other techniques, carefully crafted x86 assembly instructions.  As such it
-# currently (and likely never will) run on non-x86 platforms. 
-ExclusiveArch: x86_64 
+# currently (and likely never will) run on non-x86 platforms
+#
+ExclusiveArch: x86_64 i686
 
-%define machine native
-%define target x86_64-%{machine}-linuxapp-gcc
+# machine_arch maps between rpm and dpdk arch name, often same as _target_cpu
+%define machine_arch %{_target_cpu}
+# machine_tmpl is the config template machine name, often "native"
+%define machine_tmpl native
+# machine is the actual machine name used in the dpdk make system
+%ifarch x86_64
+%define machine default
+%endif
+%ifarch i686
+%define machine atm
+%endif
 
 %define sdkdir  %{_datadir}/%{name}
 %define docdir  %{_docdir}/%{name}
-%define incdir  %{_includedir}/%{name}
+%define incdir %{_includedir}/%{name}
 %define pmddir %{_libdir}/%{name}-pmds
 
-BuildRequires: make, gcc
-BuildRequires: kernel-headers, libpcap-devel, zlib-devel
-BuildRequires: doxygen, python-sphinx
+%define target %{machine_arch}-%{machine_tmpl}-linuxapp-gcc
+
+BuildRequires: doxygen
+BuildRequires: gcc
+BuildRequires: kernel-headers
+BuildRequires: libpcap-devel
+BuildRequires: make
+BuildRequires: numactl-devel
+BuildRequires: python-sphinx
+BuildRequires: zlib-devel
+%if %{with pdfdoc}
+BuildRequires: inkscape
+BuildRequires: texlive-babel-english
+BuildRequires: texlive-cm
+BuildRequires: texlive-cmap
+BuildRequires: texlive-dejavu
+BuildRequires: texlive-dvips
+BuildRequires: texlive-ec
+BuildRequires: texlive-fancybox
+BuildRequires: texlive-fancyhdr
+BuildRequires: texlive-framed
+BuildRequires: texlive-helvetic
+BuildRequires: texlive-kpathsea-bin
+BuildRequires: texlive-latex-bin-bin
+BuildRequires: texlive-mdwtools
+BuildRequires: texlive-metafont-bin
+BuildRequires: texlive-multirow
+BuildRequires: texlive-parskip
+BuildRequires: texlive-threeparttable
+BuildRequires: texlive-times
+BuildRequires: texlive-titlesec
+BuildRequires: texlive-upquote
+BuildRequires: texlive-wrapfig
+%endif
 
 %description
 The Data Plane Development Kit is a set of libraries and drivers for
@@ -79,6 +106,7 @@ API programming documentation for the Data Plane Development Kit.
 %if %{with tools}
 %package tools
 Summary: Tools for setting up Data Plane Development Kit environment
+Requires: %{name} = %{version}-%{release}
 Requires: kmod pciutils findutils iproute
 
 %description tools
@@ -96,60 +124,63 @@ as L2 and L3 forwarding.
 %endif
 
 %prep
-%setup -q -n %{name}-%{srcver}
-%patch2 -p1 -z .warningflags
-%patch4 -p1 -z .dtneeded
-%patch5 -p1 -z .buildopts
+%setup -q
 
 %build
+# set up a method for modifying the resulting .config file
 function setconf()
 {
-    cf=%{target}/.config
-    if grep -q $1 $cf; then
-        sed -i "s:^$1=.*$:$1=$2:g" $cf
+    if grep -q ^$1= %{target}/.config; then
+        sed -i "s:^$1=.*$:$1=$2:g" %{target}/.config
     else
-        echo $1=$2 >> $cf
+        echo $1=$2 >> %{target}/.config
     fi
 }
-# In case dpdk-devel is installed
+
+# In case dpdk-devel is installed, we should ignore its hints about the SDK directories
 unset RTE_SDK RTE_INCLUDE RTE_TARGET
 
-# Avoid appending second -Wall to everything, it breaks hand-picked
-# disablers like per-file -Wno-strict-aliasing
-export EXTRA_CFLAGS="`echo %{optflags} | sed -e 's:-Wall::g'` -fPIC"
+# Avoid appending second -Wall to everything, it breaks upstream warning
+# disablers in makefiles. Strip expclit -march= from optflags since they
+# will only guarantee build failures, DPDK is picky with that.
+export EXTRA_CFLAGS="$(echo %{optflags} | sed -e 's:-Wall::g' -e 's:-march=[[:alnum:]]* ::g') -Wformat -fPIC"
+
+# DPDK defaults to using builder-specific compiler flags.  However,
+# the config has been changed by specifying CONFIG_RTE_MACHINE=default
+# in order to build for a more generic host.  NOTE: It is possible that
+# the compiler flags used still won't work for all Fedora-supported
+# machines, but runtime checks in DPDK will catch those situations.
 
 make V=1 O=%{target} T=%{target} %{?_smp_mflags} config
 
 # DPDK defaults to optimizing for the builder host we need generic binaries
-setconf CONFIG_RTE_MACHINE default
-setconf CONFIG_RTE_SCHED_VECTOR n
+setconf CONFIG_RTE_MACHINE '"%{machine}"'
+# Disable experimental features
+setconf CONFIG_RTE_NEXT_ABI n
+setconf CONFIG_RTE_LIBRTE_CRYPTODEV n
+setconf CONFIG_RTE_LIBRTE_MBUF_OFFLOAD n
+# Disable unmaintained features
+setconf CONFIG_RTE_LIBRTE_POWER n
 
 # Enable automatic driver loading from this path
-setconf CONFIG_RTE_EAL_PMD_PATH \"%{pmddir}\"
+setconf CONFIG_RTE_EAL_PMD_PATH '"%{pmddir}"'
 
-# Enable bnx2x, pcap and vhost build, the added deps are ok for us
 setconf CONFIG_RTE_LIBRTE_BNX2X_PMD y
 setconf CONFIG_RTE_LIBRTE_PMD_PCAP y
-setconf CONFIG_RTE_LIBRTE_VHOST y
-
-%if %{with shared}
-setconf CONFIG_RTE_BUILD_SHARED_LIB y
-%endif
+setconf CONFIG_RTE_LIBRTE_VHOST_NUMA y
 
 # Disable kernel modules
 setconf CONFIG_RTE_EAL_IGB_UIO n
 setconf CONFIG_RTE_LIBRTE_KNI n
 setconf CONFIG_RTE_KNI_KMOD n
+setconf CONFIG_RTE_KNI_PREEMPT_DEFAULT n
 
-# Disable experimental and ABI-breaking code
-setconf CONFIG_RTE_NEXT_ABI n
-setconf CONFIG_RTE_LIBRTE_CRYPTODEV n
-setconf CONFIG_RTE_LIBRTE_MBUF_OFFLOAD n
+%if %{with shared}
+setconf CONFIG_RTE_BUILD_SHARED_LIB y
+%endif
 
-make V=1 O=%{target} #%{?_smp_mflags} 
-
-# Creating PDF's has excessive build-requirements, html docs suffice fine
-make V=1 O=%{target} %{?_smp_mflags} doc-api-html doc-guides-html
+make V=1 O=%{target} %{?_smp_mflags}
+make V=1 O=%{target} %{?_smp_mflags} doc-api-html doc-guides-html %{?with_pdfdoc: guides-pdf}
 
 %if %{with examples}
 make V=1 O=%{target}/examples T=%{target} %{?_smp_mflags} examples
@@ -161,29 +192,26 @@ unset RTE_SDK RTE_INCLUDE RTE_TARGET
 
 %make_install O=%{target} prefix=%{_usr} libdir=%{_libdir}
 
-# Create a driver directory with symlinks to all pmds
-mkdir -p %{buildroot}/%{pmddir}
-%if %{with shared}
-for f in %{buildroot}/%{_libdir}/*_pmd_*.so.*; do
-    bn=$(basename ${f})
-    ln -s ../${bn} %{buildroot}%{pmddir}/${bn}
-done
-%endif
-
 %if ! %{with tools}
 rm -rf %{buildroot}%{sdkdir}/tools
 rm -rf %{buildroot}%{_sbindir}/dpdk_nic_bind
 %endif
+rm -f %{buildroot}%{sdkdir}/tools/setup.sh
 
 %if %{with examples}
 find %{target}/examples/ -name "*.map" | xargs rm -f
 for f in %{target}/examples/*/%{target}/app/*; do
     bn=`basename ${f}`
-    cp -p ${f} %{buildroot}%{_bindir}/dpdk_${bn}
+    cp -p ${f} %{buildroot}%{_bindir}/dpdk_example_${bn}
 done
-%else
-rm -rf %{buildroot}%{sdkdir}/examples
 %endif
+
+# Create a driver directory with symlinks to all pmds
+mkdir -p %{buildroot}/%{pmddir}
+for f in %{buildroot}/%{_libdir}/*_pmd_*.so; do
+    bn=$(basename ${f})
+    ln -s ../${bn} %{buildroot}%{pmddir}/${bn}
+done
 
 # Setup RTE_SDK environment as expected by apps etc
 mkdir -p %{buildroot}/%{_sysconfdir}/profile.d
@@ -204,35 +232,15 @@ endif
 EOF
 
 # Fixup target machine mismatch
-sed -ie 's:-%{machine}-:-default-:g' %{buildroot}/%{_sysconfdir}/profile.d/dpdk-sdk*
-
-# Upstream has an option to build a combined library but it's bloatware which
-# wont work at all when library versions start moving, replace it with a 
-# linker script which avoids these issues. Linking against the script during
-# build resolves into links to the actual used libraries which is just fine
-# for us, so this combined library is a build-time only construct now.
-%if %{with shared}
-libext=so
-%else
-libext=a
-%endif
-comblib=libdpdk.${libext}
-
-echo "GROUP (" > ${comblib}
-find %{buildroot}/%{_libdir}/ -maxdepth 1 -name "*.${libext}" |\
-	sed -e "s:^%{buildroot}/:  :g" >> ${comblib}
-echo ")" >> ${comblib}
-install -m 644 ${comblib} %{buildroot}/%{_libdir}/${comblib}
+sed -i -e 's:-%{machine_tmpl}-:-%{machine}-:g' %{buildroot}/%{_sysconfdir}/profile.d/dpdk-sdk*
 
 %files
 # BSD
-%doc README MAINTAINERS
 %{_bindir}/testpmd
-%{_bindir}/dpdk_proc_info
-%dir %{pmddir}
+%{_bindir}/dpdk-procinfo
 %if %{with shared}
 %{_libdir}/*.so.*
-%{pmddir}/*.so.*
+%{pmddir}/
 %endif
 
 %files doc
@@ -250,26 +258,30 @@ install -m 644 ${comblib} %{buildroot}/%{_libdir}/${comblib}
 %exclude %{sdkdir}/examples/
 %endif
 %{_sysconfdir}/profile.d/dpdk-sdk-*.*
-%if %{with shared}
-%{_libdir}/*.so
-%else
+%if ! %{with shared}
 %{_libdir}/*.a
-%endif
-
-%if %{with examples}
-%files examples
-%exclude %{_bindir}/dpdk_proc_info
-%{_bindir}/dpdk_*
-%doc %{sdkdir}/examples/
+%else
+%{_libdir}/*.so
 %endif
 
 %if %{with tools}
 %files tools
 %{sdkdir}/tools/
-%{_sbindir}/dpdk_nic_bind
+%{_sbindir}/dpdk-devbind
+%{_bindir}/dpdk-pdump
+%{_bindir}/dpdk-pmdinfo
+%endif
+
+%if %{with examples}
+%files examples
+%{_bindir}/dpdk_example_*
+%doc %{sdkdir}/examples
 %endif
 
 %changelog
+* Fri Oct 14 2016 John Siegrist <john@complects.com> - 16.07-1
+- Updated package for 16.07 based on Fedora Rawhide spec changes.
+
 * Tue Dec 29 2015 John Siegrist <john@complects.com> - 2.2.0-2
 - Added missing BuildRequires dependencies.
 
