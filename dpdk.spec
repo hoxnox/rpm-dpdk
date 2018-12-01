@@ -8,10 +8,10 @@
 %bcond_with pdfdoc
 
 Name: dpdk
-Version: 16.07
+Version: 18.11
 Release: 1%{?dist}
 URL: http://dpdk.org
-Source: http://dpdk.org/browse/dpdk/snapshot/dpdk-%{version}.tar.xz
+Source: http://dpdk.org/browse/dpdk/snapshot/dpdk-%{version}.tar.gz
 
 Summary: Set of libraries and drivers for fast packet processing
 
@@ -157,7 +157,7 @@ make V=1 O=%{target} T=%{target} %{?_smp_mflags} config
 setconf CONFIG_RTE_MACHINE '"%{machine}"'
 # Disable experimental features
 setconf CONFIG_RTE_NEXT_ABI n
-setconf CONFIG_RTE_LIBRTE_CRYPTODEV n
+setconf CONFIG_RTE_LIBRTE_CRYPTODEV y
 setconf CONFIG_RTE_LIBRTE_MBUF_OFFLOAD n
 # Disable unmaintained features
 setconf CONFIG_RTE_LIBRTE_POWER n
@@ -193,10 +193,12 @@ unset RTE_SDK RTE_INCLUDE RTE_TARGET
 %make_install O=%{target} prefix=%{_usr} libdir=%{_libdir}
 
 %if ! %{with tools}
-rm -rf %{buildroot}%{sdkdir}/tools
-rm -rf %{buildroot}%{_sbindir}/dpdk_nic_bind
+rm -rf %{buildroot}%{sdkdir}/usertools
+rm -rf %{buildroot}%{_sbindir}/dpdk-devbind
+rm -rf %{buildroot}%{_bindir}/dpdk-pdump
+rm -rf %{buildroot}%{_bindir}/dpdk-pmdinfo
 %endif
-rm -f %{buildroot}%{sdkdir}/tools/setup.sh
+rm -f %{buildroot}%{sdkdir}/usertools/dpdk-setup.sh
 
 %if %{with examples}
 find %{target}/examples/ -name "*.map" | xargs rm -f
@@ -238,6 +240,9 @@ sed -i -e 's:-%{machine_tmpl}-:-%{machine}-:g' %{buildroot}/%{_sysconfdir}/profi
 # BSD
 %{_bindir}/testpmd
 %{_bindir}/dpdk-procinfo
+%{_bindir}/dpdk-test-crypto-perf
+%{_bindir}/dpdk-test-eventdev
+%{_bindir}/testbbdev
 %if %{with shared}
 %{_libdir}/*.so.*
 %{pmddir}/
@@ -252,7 +257,7 @@ sed -i -e 's:-%{machine_tmpl}-:-%{machine}-:g' %{buildroot}/%{_sysconfdir}/profi
 %{incdir}/
 %{sdkdir}/
 %if %{with tools}
-%exclude %{sdkdir}/tools/
+%exclude %{sdkdir}/usertools/
 %endif
 %if %{with examples}
 %exclude %{sdkdir}/examples/
@@ -266,7 +271,7 @@ sed -i -e 's:-%{machine_tmpl}-:-%{machine}-:g' %{buildroot}/%{_sysconfdir}/profi
 
 %if %{with tools}
 %files tools
-%{sdkdir}/tools/
+%{sdkdir}/usertools/
 %{_sbindir}/dpdk-devbind
 %{_bindir}/dpdk-pdump
 %{_bindir}/dpdk-pmdinfo
